@@ -15,7 +15,7 @@
                                       ▼
         ┌──────────┐   put_object   ┌─────────┐   s3a://staging/   ┌────────────┐
         │  Airflow │───────────────▶│  MinIO  │◀───────────────────│  Spark 4   │
-        │   3.2.1  │                │ (staging│                    │ (master +  │
+        │   3.2.2  │                │ (staging│                    │ (master +  │
         │ Scheduler│                │ warehs.)│   s3a://warehouse/ │   worker)  │
         │ + DAG    │◀────────────── │         │ ─────────────────▶ │            │
         │ Processor│   asset event  └─────────┘    Iceberg files   └─────┬──────┘
@@ -201,6 +201,15 @@ Local development only. Three categories:
 Bootstrap helper: `make init-secrets` copies `airflow.env.example` to
 `airflow.env` with freshly generated Fernet + Webserver + JWT keys.
 
+**Least privilege.** The data plane (Spark, Dremio, the app) reaches MinIO through
+an optional **scoped service account** (`MINIO_SVC_*` — RW on the `staging` +
+`warehouse` buckets only, `docker/minio-policy.json`), with root reserved for
+administration; it falls back to root only when `MINIO_SVC_*` is unset. Each
+container is injected **only the credentials it needs** (explicit per-service
+`environment:`), not the whole `.env`, so a compromised container can't read
+another system's secrets. Airflow keeps the full `.env` by design — it's the
+orchestrator that touches every system.
+
 ## 7. Where to look when something breaks
 
 | Symptom | First place to check |
@@ -286,3 +295,29 @@ off-season-vs-failure distinction and the `GE_SEASONS` override.
 `season = year(match_date)` in Gold is correct for modern editions (single
 calendar year). The only exception is the 2020 edition (finished Feb 2021), but
 since historical backfill is out of scope that's moot.
+
+## 11. Backup & restore
+
+This is a **local-compose, portfolio stack** with no formal backup process — and
+it doesn't need one, because **the data is reproducible**. All state lives in four
+named Docker volumes:
+
+| Volume | Holds | If lost |
+|--------|-------|---------|
+| `minio-data` | Bronze/Silver Iceberg files + staging JSON | Re-run the pipeline — staging re-fetches from the GE API, Bronze/Silver rebuild. |
+| `nessie-data` | Catalog refs (branch/commit history) | Recreated as Bronze/Silver re-commit; `main` is re-derived. |
+| `dremio-data` | Dremio metadata + the `lakehouse` source registration | `dremio-setup` re-provisions the source on the next `up`. |
+| `airflow-db-data` | Airflow run history / metadata | Run history is lost; DAGs + assets re-derive and re-trigger. |
+
+**Recovery = re-run the pipeline.** `docker compose down` (no `-v`) keeps the
+volumes; `down -v` wipes them, after which a fresh `up` + one staging run rebuilds
+everything Bronze→Gold.
+
+**Caveat — not point-in-time.** Re-running reconstructs the **current** state, not
+a historical snapshot: the GE public API serves only the active season (§10), so a
+wiped warehouse can't recover a past edition GE no longer publishes. Nessie's commit
+history gives time-travel *within* a surviving warehouse (read older Bronze/Silver
+via `AT BRANCH`/hash), but it's gone once `minio-data`/`nessie-data` are deleted. If
+real durability is ever needed, snapshot the four volumes (e.g. `docker run --rm -v
+minio-data:/v -v "$PWD":/backup alpine tar czf /backup/minio.tgz /v`) or back the
+buckets with a replicated object store.
