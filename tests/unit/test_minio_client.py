@@ -21,8 +21,8 @@ def test_create_minio_client_uses_settings(mock_minio_cls, mock_get_settings):
     """create_minio_client must wire Settings into the Minio constructor."""
     mock_get_settings.return_value = MagicMock(
         minio_endpoint="example:9000",
-        minio_root_user="alice",
-        minio_root_password="s3cret",  # pragma: allowlist secret
+        s3_access_key="alice",
+        s3_secret_key="s3cret",  # pragma: allowlist secret
         minio_secure=True,
     )
 
