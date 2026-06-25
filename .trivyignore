@@ -1,0 +1,15 @@
+# Trivy ignore file — documented, risk-accepted suppressions only.
+# One vulnerability ID per line. Each entry MUST carry a justification + an
+# exit condition (when it can be removed). Keep this list short.
+
+# starlette 0.52.1 — transitive via apache-airflow's FastAPI API server.
+# The fixed versions (1.1.0 / 1.3.1) are starlette 1.x, which the *pinned*
+# apache-airflow 3.2.1 / FastAPI stack does not yet support (it constrains
+# starlette < 1.0 — `uv lock --upgrade-package starlette` cannot move it).
+# Risk accepted: the Airflow API server is bound to localhost only (not
+# published — see docker-compose port notes), and the StaticFiles SSRF / UNC
+# vector requires serving static files from attacker-controlled paths, which
+# this stack does not do.
+# REMOVE when apache-airflow ships a FastAPI that supports starlette >= 1.3.1.
+CVE-2026-48818
+CVE-2026-54283
