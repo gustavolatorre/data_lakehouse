@@ -5,7 +5,7 @@ description = "Brasileirão Série A medallion data lakehouse using Airflow, PyS
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
-authors = [{ name = "Gustavo La Torre" }]
+authors = [{ name = "Gustavo Latorre" }]
 
 dependencies = [
     "pyspark==4.0.0",
