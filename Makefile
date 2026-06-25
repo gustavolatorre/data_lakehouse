@@ -1,5 +1,19 @@
 .PHONY: up down restart logs test lint fmt clean help init-secrets init-precommit security-scan validate-secrets
 
+# ── Cross-platform / Windows (Git Bash) friendliness ──────────────────────────
+# Run recipes under bash so the Unix tools the recipes call (sed/find/grep/awk/
+# cp/rm) resolve. On Windows, run `make` from **Git Bash** — it ships make, bash,
+# and those tools (PowerShell/cmd do not).
+SHELL := bash
+# uv must NOT re-sync the project env on every `uv run`: on a cloud-synced folder
+# (OneDrive) the auto-sync re-copies files the sync daemon has locked and fails
+# with `os error 32`. Provision the env once:
+#   uv pip install -e ".[dev,airflow]" --link-mode=copy
+# after that every `uv run` below skips the sync. UV_LINK_MODE=copy also makes any
+# install copy instead of hardlink, dodging the cloud-folder hardlink error (396).
+export UV_NO_SYNC := 1
+export UV_LINK_MODE := copy
+
 ## —— Docker ——————————————————————————————————————————
 up: validate-secrets ## Start all services (refuses to start on weak/placeholder creds)
 	docker compose up --build -d
