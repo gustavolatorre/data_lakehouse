@@ -40,10 +40,12 @@ def main() -> int:
         return 1
 
     if password in ("airflow", "admin", "password", "changeme"):
-        # Weak but explicitly chosen — warn loudly. Strength is enforced
-        # separately by `make validate-secrets` before the stack comes up.
+        # Weak but explicitly chosen — warn loudly, but NEVER echo the value
+        # (clear-text logging of a credential; CodeQL py/clear-text-logging-
+        # sensitive-data). Strength is enforced separately by
+        # `make validate-secrets` before the stack comes up.
         sys.stderr.write(
-            f"WARNING: AIRFLOW_PASSWORD is weak ({password!r}); "
+            "WARNING: AIRFLOW_PASSWORD is one of the known-weak values; "
             "use a strong value in .env for non-local environments.\n"
         )
 
