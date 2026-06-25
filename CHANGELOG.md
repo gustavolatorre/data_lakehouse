@@ -38,7 +38,7 @@ data lakehouse on Airflow 3 + Spark 4 + Apache Iceberg/Nessie + dbt-on-Dremio + 
   cancellation on the workflows.
 
 ### Fixed
-- **Nessie branch isolation (A1):** the branch name + execution date are now propagated
+- **Nessie branch isolation:** the branch name + execution date are now propagated
   from `create_branch` via XCom (single source of truth). The previous per-task recompute
   from `dag_run.logical_date` (UTC `now()` fallback) could diverge from `create_branch`'s
   São Paulo derivation across the midnight boundary, orphaning the isolated branch.
