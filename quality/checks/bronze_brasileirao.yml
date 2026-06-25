@@ -1,0 +1,26 @@
+# Declarative quality checks for the Bronze layer (Brasileirao).
+#
+# Loaded by src/utils/quality_runner.py before the Iceberg write. Each rule
+# runs a single Spark aggregation; a violation aborts the run (matching the
+# pre-existing check_row_count behaviour). Stable rule names — downstream
+# dashboards filter on them.
+#
+# Schema:
+#   name        : stable, human-readable identifier (required)
+#   type        : one of {row_count, missing_count, unique_count, missing_percent}
+#   column      : column the check applies to (omit for table-level checks)
+#   max         : integer threshold (e.g. missing_count: <= 0)
+#   min         : integer threshold (e.g. row_count: >= 1)
+#   max_percent : float in [0.0, 100.0] for missing_percent
+#   severity    : "fail" (default) or "warn"
+#
+# Bronze Brasileirao is "as is": only structural check is row_count > 0.
+# Column-level invariants are pushed down to Silver where data is reshaped.
+
+dataset: bronze.brasileirao
+
+checks:
+  - name: bronze_brasileirao_must_not_be_empty
+    type: row_count
+    min: 1
+    severity: fail

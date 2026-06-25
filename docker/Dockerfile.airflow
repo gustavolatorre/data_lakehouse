@@ -1,0 +1,62 @@
+FROM apache/airflow:3.2.1-python3.12
+
+USER root
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        gcc \
+        python3-dev \
+        openjdk-17-jdk-headless && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+
+USER airflow
+
+COPY pyproject.toml /opt/airflow/pyproject.toml
+
+RUN pip install --no-cache-dir \
+    pydantic-settings>=2.0 \
+    minio>=7.2.0 \
+    requests>=2.31.0 \
+    python-dotenv>=1.0.0 \
+    apache-airflow-providers-apache-spark>=4.0 \
+    apache-airflow-providers-openlineage>=2.0 \
+    pyspark==4.0.0 \
+    dbt-dremio
+
+# Helper script that writes the SimpleAuthManager passwords file at container
+# startup. SimpleAuthManager compares passwords in plaintext (no hashing
+# support), so the file holds the plaintext credential at a container-internal,
+# never-mounted path with mode 0600. Copied (not bind-mounted) so the path is
+# stable inside the image regardless of the host layout.
+COPY --chown=airflow:0 docker/airflow/generate_auth_file.py /opt/airflow/scripts/generate_auth_file.py
+
+# Download Iceberg + Hadoop-AWS + AWS SDK v2 JARs into PySpark's jars directory
+# so the driver (running in this container) has them on the system classpath.
+# These MUST match the versions baked into Dockerfile.spark for the executors.
+ARG PYSPARK_JARS=/home/airflow/.local/lib/python3.12/site-packages/pyspark/jars
+ARG ICEBERG_VERSION=1.11.0
+ARG NESSIE_VERSION=0.107.5
+ARG HADOOP_AWS_VERSION=3.4.1
+ARG AWS_SDK_V2_VERSION=2.24.6
+# Pinned SHA-512 for the JARs Maven only ships .sha1/.md5 for (see Dockerfile.spark
+# for the rationale). MUST match the values + versions in Dockerfile.spark.
+ARG HADOOP_AWS_SHA512=2e3037e3e0305f6d82de6ab92a2fd66fb6858081da447cef3397cea7f2e0bdea4af8a7d43700c7a34bfcbaecd0629f6c449bcba18647e790b2957324809de5ce
+ARG AWS_SDK_V2_SHA512=b33188b9bdebe1b698da090b8f39ec5a7f5ba81bc6dfe15a722c55ec6cad3880377bcc37c71bbc57e1bd3c4aaa33acf09683259a8b6e669c5ee59e9363976aaf
+
+# Iceberg is verified against the .sha512 Maven publishes; Hadoop-AWS + AWS SDK
+# v2 against the pinned SHA-512 ARGs above. A tampered download fails the build.
+# Versions MUST match Dockerfile.spark.
+RUN set -eu && \
+    MAVEN="https://repo1.maven.org/maven2" && \
+    ICEBERG_URL="${MAVEN}/org/apache/iceberg/iceberg-spark-runtime-4.0_2.13/${ICEBERG_VERSION}/iceberg-spark-runtime-4.0_2.13-${ICEBERG_VERSION}.jar" && \
+    curl -fSL "${ICEBERG_URL}" -o "${PYSPARK_JARS}/iceberg-spark-runtime.jar" && \
+    echo "$(curl -fsSL ${ICEBERG_URL}.sha512 | tr -d '\r\n')  ${PYSPARK_JARS}/iceberg-spark-runtime.jar" | sha512sum -c - && \
+    HADOOP_AWS_URL="${MAVEN}/org/apache/hadoop/hadoop-aws/${HADOOP_AWS_VERSION}/hadoop-aws-${HADOOP_AWS_VERSION}.jar" && \
+    curl -fSL "${HADOOP_AWS_URL}" -o "${PYSPARK_JARS}/hadoop-aws.jar" && \
+    echo "${HADOOP_AWS_SHA512}  ${PYSPARK_JARS}/hadoop-aws.jar" | sha512sum -c - && \
+    AWS_SDK_URL="${MAVEN}/software/amazon/awssdk/bundle/${AWS_SDK_V2_VERSION}/bundle-${AWS_SDK_V2_VERSION}.jar" && \
+    curl -fSL "${AWS_SDK_URL}" -o "${PYSPARK_JARS}/aws-java-sdk-bundle.jar" && \
+    echo "${AWS_SDK_V2_SHA512}  ${PYSPARK_JARS}/aws-java-sdk-bundle.jar" | sha512sum -c -

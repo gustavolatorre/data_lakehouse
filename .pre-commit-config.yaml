@@ -1,0 +1,58 @@
+# Hooks that run on every `git commit` (after `pre-commit install`).
+# Keep the list narrow — same checks the CI runs, so we don't surprise
+# anyone with brand-new rules that only fire locally.
+#
+# Bootstrap:
+#   uv pip install pre-commit
+#   pre-commit install
+#
+# Refresh hook versions periodically with `pre-commit autoupdate`.
+default_language_version:
+  python: python3.12
+
+repos:
+  # ── Whitespace / file hygiene ───────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        # Leave generated files alone (lockfiles, dbt target output, snapshots).
+        exclude: ^(uv\.lock|dbt_project/target/|dbt_project/dbt_packages/)
+      - id: end-of-file-fixer
+        exclude: ^(uv\.lock|dbt_project/target/|dbt_project/dbt_packages/)
+      - id: check-yaml
+        # Allow custom tags used by dbt and GH Actions composite syntax.
+        args: ["--allow-multiple-documents", "--unsafe"]
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        # Catch accidental binary commits (default threshold 500 kB).
+        args: ["--maxkb=500"]
+      - id: detect-private-key
+
+  # ── Python lint & format (must mirror CI) ───────────────────────
+  # Keep this rev on the same ruff line as pyproject.toml (`ruff>=0.15.15`).
+  # A stale hook (this was pinned to v0.7.4) lets the local pre-commit format/lint
+  # diverge from CI, so let Dependabot bump both together.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.15
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        files: ^(src|tests|dags)/.*\.py$
+      - id: ruff-format
+        files: ^(src|tests|dags)/.*\.py$
+
+  # ── Secrets scanner ─────────────────────────────────────────────
+  # detect-secrets keeps a baseline of approved findings in
+  # .secrets.baseline. The first run creates the baseline with:
+  #   detect-secrets scan > .secrets.baseline
+  # After that, the hook fails when a *new* secret-like string appears
+  # that is not in the baseline.
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+        exclude: ^(uv\.lock|dbt_project/target/|dbt_project/dbt_packages/|\.secrets\.baseline)

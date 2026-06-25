@@ -1,0 +1,83 @@
+[project]
+name = "data-lake"
+version = "3.1.0"
+description = "Brasileirão Série A medallion data lakehouse using Airflow, PySpark, Apache Iceberg, Nessie, and dbt"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Gustavo La Torre" }]
+
+dependencies = [
+    "pyspark==4.0.0",
+    "pyspark-client==4.0.0",
+    "pydantic-settings>=2.14.1",
+    "minio>=7.2.20",
+    "requests>=2.34.2",
+    "python-dotenv>=1.2.2",
+    "beautifulsoup4>=4.14.3",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+    "chispa>=0.12.0",
+    "responses>=0.26.1",
+    "ruff>=0.15.15",
+    "mypy>=2.1.0",
+]
+airflow = [
+    "apache-airflow==3.2.1",
+    "apache-airflow-providers-apache-spark>=4.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "TCH",  # flake8-type-checking
+]
+ignore = ["E501", "N812"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
+ignore_missing_imports = true
+warn_return_any = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+# Default to unit-only discovery. Integration tests need the Iceberg
+# runtime JAR + (for DagBag) the airflow extras, so they run in their
+# own CI job that points at `tests/integration/` explicitly.
+testpaths = ["tests/unit"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["src/__init__.py", "src/*/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 85

@@ -1,0 +1,43 @@
+name: CodeQL
+
+# Static analysis (SAST) of the Python code. Trivy in the Security job is SCA
+# (dependency CVEs); CodeQL analyzes our own code for injection, unsafe
+# deserialization, path traversal, etc. Free on public repos.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    # Weekly sweep (Mondays 04:27 UTC) catches advisories published after merge.
+    - cron: "27 4 * * 1"
+
+# CodeQL uploads results via the security-events API, which needs write.
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
+        with:
+          languages: python
+          # Broader security coverage than the default suite.
+          queries: security-extended
+
+      # No build step: Python is interpreted, so CodeQL analyzes the source
+      # directly (no autobuild needed).
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
+        with:
+          category: "/language:python"

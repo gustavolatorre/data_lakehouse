@@ -1,0 +1,96 @@
+# Declarative quality checks for the Silver Brasileirao layer.
+#
+# Loaded by src/utils/quality_runner.py AFTER the MERGE INTO completes.
+# Each rule runs a single Spark aggregation against `nessie.silver.brasileirao`
+# as it stands post-merge.
+#
+# A violation of any fail-severity rule raises QualityCheckError, which
+# propagates up through `transform`, fails the SparkSubmit task, and the
+# Nessie branch wrapping this run gets dropped by `cleanup_branch` in the
+# DAG — `main` stays untouched.
+
+dataset: silver.brasileirao
+
+checks:
+  # ── Structural invariants ───────────────────────────────────────────────
+  # These MUST hold after every MERGE or the table is broken in a way
+  # downstream Gold layers cannot recover from.
+
+  - name: silver_must_not_be_empty
+    type: row_count
+    min: 1
+    severity: fail
+
+  - name: silver_ge_match_id_no_nulls
+    # MERGE key. NULL ids only reach here if the quarantine sink failed.
+    type: missing_count
+    column: ge_match_id
+    max: 0
+    severity: fail
+
+  - name: silver_ge_match_id_unique
+    # MERGE is ON t.ge_match_id = s.ge_match_id. Duplicates would mean the
+    # MERGE produced a non-deterministic result (race or upstream bug).
+    type: unique_count
+    column: ge_match_id
+    severity: fail
+
+  - name: silver_match_date_no_nulls
+    # match_date drives partitioning via months(match_date). A NULL here
+    # would create an unrouted partition; Iceberg won't error but Dremio
+    # queries that prune on date will silently miss those rows.
+    type: missing_count
+    column: match_date
+    max: 0
+    severity: fail
+
+  - name: silver_stadium_state_no_nulls
+    # Enrichment always lands one of {STADIUM_LOOKUP, HOME_TEAM_FALLBACK,
+    # UNKNOWN} — never NULL. If this trips, the enrichment cascade has a
+    # bug.
+    type: missing_count
+    column: stadium_state
+    max: 0
+    severity: fail
+
+  - name: silver_stadium_state_origin_no_nulls
+    # Paired with stadium_state — both columns are populated together.
+    type: missing_count
+    column: stadium_state_origin
+    max: 0
+    severity: fail
+
+  - name: silver_is_active_no_nulls
+    # is_active is set to true by both MERGE branches (UPDATE and INSERT).
+    # NULL would mean a regression broke the flag.
+    type: missing_count
+    column: is_active
+    max: 0
+    severity: fail
+
+  # ── Soft signals — alert without aborting ──────────────────────────────
+  # Guard against gradual upstream degradation (the staging filter changes,
+  # the API starts returning more incomplete records, etc.).
+
+  - name: silver_stadium_rarely_missing
+    # stadium itself (the name) coming up empty would indicate the GE API
+    # changed its sede field shape. Quiet warning until > 5% of rows.
+    type: missing_percent
+    column: stadium
+    max_percent: 5.0
+    severity: warn
+
+  - name: silver_score_home_rarely_missing
+    # The staging filter only uploads matches with score_home set, so
+    # post-MERGE NULLs are an upstream regression. Warn at 1% — anything
+    # higher indicates the filter broke.
+    type: missing_percent
+    column: score_home
+    max_percent: 1.0
+    severity: warn
+
+  - name: silver_score_away_rarely_missing
+    type: missing_percent
+    column: score_away
+    max_percent: 1.0
+    severity: warn

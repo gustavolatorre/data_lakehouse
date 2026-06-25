@@ -1,0 +1,48 @@
+name: Docker Build
+
+# Building the two custom images is the slowest job (~7 min, no layer cache),
+# and the images only change when their Dockerfiles or baked-in deps change.
+# So — unlike the main CI workflow, which runs on every push/PR — this runs ONLY
+# when something that actually affects an image build changes:
+#   * docker/**          Dockerfiles + provisioning scripts they COPY
+#   * pyproject.toml     Dockerfile.airflow installs the project deps from it
+#   * this workflow file
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "docker/**"
+      - "pyproject.toml"
+      - ".github/workflows/docker-build.yml"
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "docker/**"
+      - "pyproject.toml"
+      - ".github/workflows/docker-build.yml"
+
+# Build-only (nothing is pushed) — read is all GITHUB_TOKEN needs.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    # Build both custom images so an image-level breakage (bad JAR URL,
+    # Dockerfile typo, base-image drift, failed SHA verification) is caught
+    # here instead of at `make up` time. Build only — nothing is pushed.
+    # Plain `docker build` (Docker is preinstalled on the runner) to avoid
+    # adding marketplace actions that would need SHA pinning.
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Build Spark image
+        run: docker build -f docker/Dockerfile.spark -t data_lake-spark:ci .
+
+      - name: Build Airflow image
+        run: docker build -f docker/Dockerfile.airflow -t data_lake-airflow:ci .

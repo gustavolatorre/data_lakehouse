@@ -1,0 +1,35 @@
+version: 2
+
+models:
+  - name: stg_silver_brasileirao
+    description: "Staging model for Silver Brasileirão match data. Reads from lakehouse.silver.brasileirao (Nessie main)."
+    columns:
+      - name: ge_match_id
+        description: "Globo Esporte match id — one row per played match."
+        tests:
+          - unique
+          - not_null
+      - name: home_team
+        description: "Home team name (accent-stripped in Silver)."
+        tests:
+          - not_null
+      - name: away_team
+        description: "Away team name (accent-stripped in Silver)."
+        tests:
+          - not_null
+      - name: score_home
+        description: "Goals scored by the home team."
+        tests:
+          - not_null
+      - name: score_away
+        description: "Goals scored by the away team."
+        tests:
+          - not_null
+      - name: matchweek
+        description: "Round number (rodada), 1–38."
+      - name: match_date
+        description: "Date the match was played."
+      - name: season
+        description: "Championship edition (calendar year of the match date)."
+        tests:
+          - not_null

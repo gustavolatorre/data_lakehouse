@@ -1,0 +1,114 @@
+# Keep dependencies fresh across the 3 ecosystems we actually consume.
+# Weekly cadence on Mondays keeps the noise contained and grouped.
+# A PR limit of 5 per ecosystem stops Dependabot from drowning us if
+# upstream cuts many releases in a single week.
+version: 2
+
+updates:
+  # ── Python (pyproject.toml + uv.lock) ─────────────────────────
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      # Bundle minor + patch upgrades into a single PR per group so the
+      # review queue does not explode.
+      python-minor-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      # PySpark and the Airflow stack are pinned to specific versions in the
+      # Docker images for classpath / JAR compatibility. Bumping them through
+      # Dependabot would land a broken image; we upgrade those manually with
+      # the matching Dockerfile changes.
+      - dependency-name: "pyspark"
+      # pyspark-client ships with pyspark and must stay on the same version as
+      # the 4.0.0 cluster (Spark Connect protocol). It was missing here, so a
+      # 4.1.2 bump slipped through (PR #67, closed) — pin it in lockstep too.
+      - dependency-name: "pyspark-client"
+      - dependency-name: "apache-airflow"
+      - dependency-name: "apache-airflow-providers-*"
+
+  # ── GitHub Actions ────────────────────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+
+  # ── Docker base images ────────────────────────────────────────
+  # Dependabot scans both Dockerfiles for `FROM` directives.
+  - package-ecosystem: "docker"
+    directory: "/docker"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore(docker)"
+      include: "scope"
+    ignore:
+      # These base images MUST stay in lockstep with the pinned pip packages
+      # (pyspark==4.0.0 and apache-airflow==3.2.1 in pyproject.toml). Bumping
+      # the image without bumping the matching pip pin produces a driver vs
+      # cluster protocol mismatch at runtime, which Dependabot cannot detect
+      # because it scans each ecosystem in isolation.
+      # PR #25 (apache/spark 4.0.0 -> 4.1.2) hit exactly this trap.
+      # Upgrades to these images happen by hand alongside the pip pin bump
+      # and any classpath adjustments.
+      - dependency-name: "apache/spark"
+      - dependency-name: "apache/airflow"
+
+  # ── Docker Compose images ─────────────────────────────────────
+  # The /docker entry above only scans the Dockerfiles; the pulled images in
+  # the root docker-compose.yml (postgres, minio, nessie, dremio, ...) live in
+  # a different directory and were never tracked — that's why postgres sat on
+  # 14.0 for years (B-07). This entry scans the compose file at the repo root.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore(docker)"
+      include: "scope"
+    ignore:
+      # Version-locked to the Iceberg catalog / table format the pipeline reads:
+      # bumping blindly breaks compatibility (e.g. Dremio 25 cannot read Iceberg
+      # format-v3; Nessie is pinned to the catalog the Spark jobs bind to).
+      # Upgrade these by hand alongside any catalog / format migration.
+      - dependency-name: "projectnessie/nessie"
+      - dependency-name: "dremio/dremio-oss"
+      # Stay within Postgres major 14 (no on-disk pg_upgrade in a bind-mounted
+      # volume); allow minor/patch security bumps to flow.
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]

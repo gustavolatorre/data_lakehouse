@@ -1,0 +1,35 @@
+version: 2
+
+sources:
+  - name: nessie_silver
+    description: >
+      Silver-layer Iceberg tables exposed to Dremio via the Nessie catalog
+      (registered as the "lakehouse" source).
+    database: lakehouse
+    schema: silver
+    tables:
+      - name: brasileirao
+        identifier: brasileirao
+        # Tagged so the source tests build with the Brasileirão Gold DAG
+        # (`dbt build --select tag:brasileirao`).
+        tags: ['brasileirao']
+        description: >
+          Cleaned, enriched Brasileirão Série A match records produced by the
+          Bronze → Silver full-reconcile MERGE pipeline — one row per played
+          match, keyed on the Globo Esporte match id.
+        # NOTE: intentionally NO freshness SLA. The football calendar has long
+        # planned gaps — mid-season FIFA dates, the World Cup / Copa América
+        # windows, and the year-end off-season — during which no new match
+        # finishes for weeks. A staleness SLA would raise false alarms throughout
+        # those breaks. Completeness is guarded downstream by the full-reconcile
+        # pipeline + the model tests instead.
+        columns:
+          - name: ge_match_id
+            description: Globo Esporte match id — the Silver MERGE key.
+            tests:
+              - unique
+              - not_null
+          - name: updated_at
+            description: Last modification timestamp set by the Silver MERGE.
+            tests:
+              - not_null

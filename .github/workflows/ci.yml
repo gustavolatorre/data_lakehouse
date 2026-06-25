@@ -1,0 +1,225 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# Least-privilege default for GITHUB_TOKEN — no job here needs more than read.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref (consecutive pushes to a PR) instead
+# of running full pipelines in parallel.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Create venv and install dev dependencies
+        run: |
+          uv venv
+          uv pip install -e ".[dev]"
+
+      - name: Ruff lint
+        run: uv run ruff check src/ tests/ dags/
+
+      - name: Ruff format check
+        run: uv run ruff format --check src/ tests/ dags/
+
+      - name: Mypy type check
+        run: uv run mypy src/
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Java 17
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Create venv and install dev dependencies
+        run: |
+          uv venv
+          uv pip install -e ".[dev]"
+
+      - name: Run tests with coverage
+        env:
+          MINIO_ROOT_USER: test-user
+          MINIO_ROOT_PASSWORD: test-password  # pragma: allowlist secret
+        run: uv run pytest --cov=src --cov-report=term-missing tests/unit/
+
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    # Heavier than the unit job: pulls in the airflow extras + lets Spark
+    # fetch the Iceberg runtime JAR through Ivy on first start.
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Java 17
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Create venv and install dev + airflow extras
+        run: |
+          uv venv
+          uv pip install -e ".[dev,airflow]"
+
+      - name: Cache Spark Ivy jars
+        # First Spark start downloads ``iceberg-spark-runtime-4.0_2.13`` via
+        # Ivy. Caching ``~/.ivy2`` shaves ~30s off subsequent CI runs.
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.ivy2
+            ~/.cache/coursier
+          key: spark-ivy-iceberg-1.11.0-${{ runner.os }}
+
+      - name: Run integration tests
+        env:
+          # The shared settings module reads these even when integration
+          # tests don't actually talk to MinIO — keep them harmless.
+          MINIO_ROOT_USER: test-user
+          MINIO_ROOT_PASSWORD: test-password  # pragma: allowlist secret
+        # F-08: emit coverage here too. This job has Java + the Iceberg runtime,
+        # so it actually exercises the Spark transform/DDL code paths that the
+        # unit job can only import — giving a true coverage picture for them.
+        # `--cov-fail-under=0` overrides the repo-wide fail_under=85: the e2e
+        # suite is not meant to cover all of src/ (the unit Test job owns the
+        # 85% gate); here we only want the per-module number for visibility.
+        run: uv run pytest -v --cov=src --cov-report=term-missing --cov-fail-under=0 tests/integration/
+
+  dbt-validate:
+    name: dbt Validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dbt_project
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dbt-duckdb (offline parsing only)
+        # dbt-dremio is NOT used here: it tries to authenticate to the Dremio
+        # warehouse even during `dbt parse`, which we can't have on a CI
+        # runner that has no Dremio reachable. dbt-duckdb runs in-memory with
+        # zero network calls, so it satisfies the adapter contract while
+        # letting us validate the project structure (refs, macros, jinja,
+        # schema.yml). The `ci` target in profiles.yml is wired for duckdb.
+        # We call .venv/bin/dbt directly to bypass uv's project resolution
+        # (the parent pyproject.toml has no dbt deps).
+        run: |
+          uv venv
+          uv pip install "dbt-duckdb>=1.10,<1.11"
+
+      - name: dbt deps
+        env:
+          DBT_TARGET: ci
+        run: .venv/bin/dbt deps --profiles-dir .
+
+      - name: dbt parse
+        # `dbt parse` resolves refs/macros/jinja with the adapter loaded.
+        # duckdb in-memory satisfies the adapter without any network call.
+        # Catches: broken refs, undefined macros, schema.yml errors, jinja
+        # syntax errors. Does NOT catch Dremio-specific SQL — that's caught
+        # at real `dbt build` time in the Airflow DAG.
+        env:
+          DBT_TARGET: ci
+        run: .venv/bin/dbt parse --profiles-dir .
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    # Graduated gating (see SECURITY.md): the job blocks on **fixable HIGH +
+    # CRITICAL** vulnerabilities (the final Trivy fs step) now that the fixable
+    # backlog is clean (F-12 — verified 0 findings on main). pip-audit and the
+    # Trivy config scan stay informational (`continue-on-error: true`) so
+    # unfixable transitives / config nits don't block unrelated work.
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Install dev dependencies + pip-audit
+        run: |
+          uv venv
+          uv pip install -e ".[dev]"
+          uv pip install "pip-audit>=2.7"
+
+      - name: pip-audit (Python deps) — informational
+        continue-on-error: true
+        # Freeze just the non-editable installed packages into a requirements
+        # file, then audit that. Avoids the "data-lake: distribution marked
+        # as editable" error that pip-audit raises when the local project is
+        # installed with `-e .`.
+        # `--strict` flags any vulnerability; kept informational because it has
+        # no severity filter and would otherwise block on unfixable transitives.
+        run: |
+          uv pip freeze --exclude-editable > /tmp/audit-requirements.txt
+          uv run pip-audit --strict --requirement /tmp/audit-requirements.txt
+
+      - name: Trivy config scan (Dockerfiles + compose) — informational
+        continue-on-error: true
+        # Misconfigurations only — secrets, root containers, missing healthchecks,
+        # etc. Less noisy than vuln scans, so we surface MEDIUM+ here.
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: MEDIUM,HIGH,CRITICAL
+          exit-code: 1
+          format: table
+
+      - name: Trivy fs gate (HIGH + CRITICAL, blocking)
+        # The step that fails the build. F-12: promoted from CRITICAL-only to
+        # HIGH,CRITICAL now that the fixable HIGH backlog is clean (0 findings on
+        # main). Fixable only (`ignore-unfixed`) — we still don't block on
+        # unpatched-upstream transitives, only on findings we can actually fix.
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+          format: table

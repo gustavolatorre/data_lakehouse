@@ -1,0 +1,283 @@
+# ──────────────────────────────────────────────────────
+# Reusable service definitions
+# ──────────────────────────────────────────────────────
+
+x-spark-common: &spark-common
+  image: data_lake-spark:latest
+  pull_policy: never
+  volumes:
+    - ./src:/opt/spark/src
+    # Declarative DQ rules consumed when the driver runs on the Spark side.
+    # Mirrors the Airflow mount so the same hard-coded path works in either
+    # deploy_mode (client / cluster).
+    - ./quality:/opt/airflow/quality
+  env_file:
+    - .env
+  networks:
+    - lakehouse
+
+x-airflow-common: &airflow-common
+  image: data_lake-airflow:latest
+  pull_policy: never
+  env_file:
+    - airflow.env
+    - .env
+  environment:
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "${AIRFLOW_USER}:admin"
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: "/opt/airflow/simple_auth_passwords.json"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://webserver:8080/execution/"
+    PYTHONPATH: "/opt/airflow"
+    # Spark connection wired via env var (Airflow 3 idiom). Replaces the
+    # legacy plugins/create_spark_connection.py which used @provide_session +
+    # ORM, blocked by RuntimeError: "Direct database access via the ORM is
+    # not allowed in Airflow 3.0".
+    AIRFLOW_CONN_SPARK_DOCKER: "spark://spark-master:7077/?deploy_mode=client"
+  volumes:
+    - ./src:/opt/airflow/src
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./dbt_project:/opt/airflow/dbt_project
+    # Declarative DQ rules consumed by src/utils/quality_runner.py (P3.7).
+    - ./quality:/opt/airflow/quality
+  depends_on:
+    postgres:
+      condition: service_healthy
+  networks:
+    - lakehouse
+
+# ──────────────────────────────────────────────────────
+# Services
+# ──────────────────────────────────────────────────────
+
+services:
+
+  # ── Spark ──────────────────────────────────────────
+  spark-master:
+    <<: *spark-common
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.spark
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    # SECURITY: port 7077 (job submission) is NOT bound to host — Spark Master
+    # has no authentication, and binding it would let any local process submit
+    # jobs that execute code with access to the ./src volume.
+    # Airflow submits via the internal Docker network (conn_id=spark_docker).
+    ports:
+      - "127.0.0.1:9090:8080" # Spark UI (bound to loopback only)
+    expose:
+      - "7077" # Spark master port (intra-network only)
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  spark-worker:
+    <<: *spark-common
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    environment:
+      SPARK_MODE: worker
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_MEMORY: 2g
+      SPARK_MASTER_URL: spark://spark-master:7077
+
+  # ── Nessie (Iceberg REST Catalog) ─────────────────
+  # SECURITY: Port 19120 is NOT bound to host. Nessie is reachable only inside
+  # the 'lakehouse' Docker network (Spark, Dremio, Airflow). For dev access to
+  # the Nessie UI, use 'docker compose exec nessie curl ...' or temporarily add
+  # 'ports: ["19120:19120"]' below — but never in production.
+  # For production: enable bearer token auth via QUARKUS_OIDC_* settings.
+  nessie:
+    image: ghcr.io/projectnessie/nessie:0.107.5
+    container_name: nessie
+    expose:
+      - "19120"
+    environment:
+      QUARKUS_HTTP_PORT: 19120
+    networks:
+      - lakehouse
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:19120/api/v2/config" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── PostgreSQL (Airflow metadata) ─────────────────
+  postgres:
+    # Stay within major 14 (same on-disk format → no pg_upgrade) but track a
+    # recent patch for security fixes; 14.0 was the oldest 14 release (B-06).
+    image: postgres:14.15
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-db-data:/var/lib/postgresql/data
+    networks:
+      - lakehouse
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Airflow ───────────────────────────────────────
+  scheduler:
+    <<: *airflow-common
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.airflow
+    # `airflow pools set` is idempotent (insert-or-update), so re-running on
+    # container restart never errors. The spark_worker pool has slots=1 and is
+    # shared by EVERY Spark task across all DAGs (daily Bronze/Silver for both
+    # pipelines + weekly maintenance), so only one job ever submits to the single
+    # 2GB Spark worker at a time — no concurrent-OOM (B-02). See
+    # dags/iceberg_maintenance.py for context.
+    command: >-
+      bash -c "python /opt/airflow/scripts/generate_auth_file.py
+      && airflow db migrate
+      && airflow pools set spark_worker 1 'Single slot: serializes all Spark jobs on the one 2GB worker'
+      && airflow scheduler"
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nessie:
+        condition: service_healthy
+
+  dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nessie:
+        condition: service_healthy
+
+  webserver:
+    <<: *airflow-common
+    command: bash -c "python /opt/airflow/scripts/generate_auth_file.py && airflow api-server"
+    restart: always
+    ports:
+      - "127.0.0.1:8080:8080" # Airflow UI (bound to loopback only)
+    depends_on:
+      - scheduler
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ── MinIO (S3-compatible storage) ─────────────────
+  minio:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    container_name: minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_DOMAIN: minio
+    ports:
+      - "127.0.0.1:9001:9001" # MinIO Console (bound to loopback only)
+      - "127.0.0.1:9000:9000" # MinIO API (bound to loopback only)
+    command: [ "server", "/data", "--console-address", ":9001" ]
+    volumes:
+      - minio-data:/data
+    networks:
+      - lakehouse
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  minio-setup:
+    image: minio/mc:RELEASE.2024-11-17T19-35-25Z
+    container_name: minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c '
+        echo "Waiting for MinIO...";
+        until mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do
+          sleep 2;
+        done;
+        echo "Creating buckets...";
+        mc mb --ignore-existing local/staging &&
+        mc mb --ignore-existing local/warehouse &&
+        echo "Buckets created successfully." &&
+        exit 0;
+      '
+    env_file:
+      - .env
+    networks:
+      - lakehouse
+
+  # ── Dremio (Query Engine) ─────────────────────────
+  dremio:
+    image: dremio/dremio-oss:25.0.0
+    container_name: dremio
+    ports:
+      - "127.0.0.1:9047:9047" # Dremio UI (bound to loopback only)
+      - "127.0.0.1:31010:31010" # Dremio JDBC (bound to loopback only)
+    environment:
+      - DREMIO_JAVA_EXTRA_OPTS=-Xss4M
+    volumes:
+      - dremio-data:/opt/dremio/data
+    networks:
+      - lakehouse
+    depends_on:
+      nessie:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9047/apiv2/server_status" ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # ── Dremio Source Provisioner ─────────────────────
+  dremio-setup:
+    image: curlimages/curl:8.10.1
+    container_name: dremio-setup
+    restart: on-failure
+    env_file:
+      - .env
+    environment:
+      - DREMIO_ADMIN_USER=${DREMIO_ADMIN_USER}
+      - DREMIO_ADMIN_PASSWORD=${DREMIO_ADMIN_PASSWORD}
+    volumes:
+      - ./docker/dremio/setup_sources.sh:/setup_sources.sh
+    entrypoint: [ "/bin/sh", "/setup_sources.sh" ]
+    networks:
+      - lakehouse
+    depends_on:
+      dremio:
+        condition: service_healthy
+
+# ──────────────────────────────────────────────────────
+# Infrastructure
+# ──────────────────────────────────────────────────────
+
+volumes:
+  minio-data:
+  dremio-data:
+  nessie-data:
+  airflow-db-data:
+
+networks:
+  lakehouse:
+    driver: bridge

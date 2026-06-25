@@ -1,0 +1,61 @@
+version: 2
+
+models:
+  - name: mart_classificacao_brasileirao
+    description: >
+      Brasileirão Série A league table (classificação), one row per
+      (season, team): games, wins, draws, losses, goals for/against, goal
+      difference, points, win-efficiency, and the ranked position. RANK is
+      per season; consumers order by (season, classificacao). Grain uniqueness
+      on (season, time_) is enforced by the singular test
+      assert_classificacao_unique_season_team.
+    columns:
+      - name: season
+        description: "Championship edition (calendar year), derived from the match date."
+        tests:
+          - not_null
+      - name: classificacao
+        description: "League position via RANK() within the season — ties share a position (and skip the next)."
+        # NOT unique: RANK() can legitimately tie two teams on the same position.
+        tests:
+          - not_null
+      - name: time_
+        description: "Team name. Unique only WITHIN a season (see the grain singular test)."
+        tests:
+          - not_null
+      - name: quantidade_de_jogos
+        description: "Games played (home + away)."
+        tests:
+          - not_null
+      - name: numero_de_vitorias
+        description: "Total wins."
+        tests:
+          - not_null
+      - name: empates
+        description: "Total draws."
+        tests:
+          - not_null
+      - name: derrotas
+        description: "Total losses."
+        tests:
+          - not_null
+      - name: numero_de_gols_pro
+        description: "Goals for (scored)."
+        tests:
+          - not_null
+      - name: gols_contra
+        description: "Goals against (conceded)."
+        tests:
+          - not_null
+      - name: saldo_de_gols
+        description: "Goal difference (goals for − goals against)."
+        tests:
+          - not_null
+      - name: pontuacao
+        description: "Points (win = 3, draw = 1, loss = 0)."
+        tests:
+          - not_null
+      - name: aproveitamento
+        description: "Win efficiency: points won as a % of points available (jogos × 3). Domain [0, 100]."
+        tests:
+          - not_null

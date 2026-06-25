@@ -1,0 +1,37 @@
+# Force LF line endings on files that are executed inside Linux containers
+# or parsed by tools that don't tolerate CR. Without this, Windows clones
+# (which usually have core.autocrlf=true) silently break shell scripts
+# and Dockerfiles by converting LF -> CRLF on checkout.
+
+# Shell scripts MUST be LF — Bash / sh in Alpine/Ubuntu containers fail with
+# "syntax error: unexpected word" on CRLF.
+*.sh           text eol=lf
+*.bash         text eol=lf
+
+# Dockerfiles — RUN instructions break on CRLF.
+Dockerfile     text eol=lf
+Dockerfile.*   text eol=lf
+*.dockerfile   text eol=lf
+
+# Python — keep LF for cross-platform consistency.
+*.py           text eol=lf
+
+# YAML / JSON / TOML — config files read by tools that may not strip CR.
+*.yml          text eol=lf
+*.yaml         text eol=lf
+*.json         text eol=lf
+*.toml         text eol=lf
+
+# Markdown — LF is the de-facto standard.
+*.md           text eol=lf
+
+# SQL — dbt and Spark parsers usually handle both, but be explicit.
+*.sql          text eol=lf
+
+# Lockfiles — must match upstream byte-for-byte.
+uv.lock        text eol=lf
+package-lock.json text eol=lf
+
+# Default: auto-detect text vs binary; keep platform-native EOL on text we
+# didn't pin above. (Safe default — only the entries above are forced.)
+* text=auto

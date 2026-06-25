@@ -1,0 +1,50 @@
+data_lake_gold:
+  # Default target; override per-invocation with `dbt run --target staging` or
+  # via the DBT_TARGET environment variable when wiring CI/CD.
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
+
+  outputs:
+    dev:
+      type: dremio
+      software_host: dremio
+      port: 9047
+      use_ssl: false
+      user: "{{ env_var('DREMIO_ADMIN_USER') }}"
+      password: "{{ env_var('DREMIO_ADMIN_PASSWORD') }}"
+      space: "lakehouse"
+      schema: "gold_dev"
+      datalake: "lakehouse"
+      threads: 4
+
+    staging:
+      type: dremio
+      software_host: "{{ env_var('DREMIO_HOST', 'dremio') }}"
+      port: "{{ env_var('DREMIO_PORT', '9047') | int }}"
+      use_ssl: "{{ env_var('DREMIO_USE_SSL', 'false') | lower == 'true' }}"
+      user: "{{ env_var('DREMIO_ADMIN_USER') }}"
+      password: "{{ env_var('DREMIO_ADMIN_PASSWORD') }}"
+      space: "lakehouse"
+      schema: "gold_staging"
+      datalake: "lakehouse"
+      threads: 4
+
+    prod:
+      type: dremio
+      software_host: "{{ env_var('DREMIO_HOST') }}"
+      port: "{{ env_var('DREMIO_PORT', '9047') | int }}"
+      use_ssl: "{{ env_var('DREMIO_USE_SSL', 'true') | lower == 'true' }}"
+      user: "{{ env_var('DREMIO_ADMIN_USER') }}"
+      password: "{{ env_var('DREMIO_ADMIN_PASSWORD') }}"
+      space: "lakehouse"
+      schema: "gold"
+      datalake: "lakehouse"
+      threads: 8
+
+    # CI-only target. Uses dbt-duckdb in-memory so `dbt parse` can validate
+    # refs, macros, jinja, and schema.yml WITHOUT connecting to Dremio. Not
+    # intended to actually execute models — Dremio-specific SQL (e.g. the
+    # `AT BRANCH main` clause in stg_silver_brasileirao) will not compile here.
+    ci:
+      type: duckdb
+      path: ":memory:"
+      threads: 1
