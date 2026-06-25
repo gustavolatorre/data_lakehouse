@@ -223,3 +223,30 @@ jobs:
           ignore-unfixed: true
           exit-code: 1
           format: table
+
+  pre-commit:
+    name: Pre-commit
+    runs-on: ubuntu-latest
+    # Runs the full .pre-commit-config.yaml on every PR so a contributor who
+    # skipped `pre-commit install` can't bypass the hygiene hooks + detect-secrets
+    # (the Lint job already covers ruff, but not the rest). Mirrors the local hooks.
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Cache pre-commit hook environments
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Run pre-commit on all files
+        run: |
+          uv venv
+          uv pip install pre-commit
+          uv run pre-commit run --all-files --show-diff-on-failure
