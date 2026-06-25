@@ -6,8 +6,8 @@ Prerequisites: Docker Desktop, `uv` (Astral's package manager), `make`.
 
 ```bash
 # 1. Clone + enter the repo
-git clone https://github.com/gustavolatorre/data_lake.git
-cd data_lake
+git clone https://github.com/gustavolatorre/data_lakehouse.git
+cd data_lakehouse
 
 # 2. Python deps (creates .venv)
 uv venv --python 3.12

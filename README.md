@@ -1,19 +1,19 @@
 # Brasileirão Série A — Data Lakehouse Engineering Manual
 
-[![CI](https://github.com/gustavolatorre/data_lake/actions/workflows/ci.yml/badge.svg)](https://github.com/gustavolatorre/data_lake/actions/workflows/ci.yml)
+[![CI](https://github.com/gustavolatorre/data_lakehouse/actions/workflows/ci.yml/badge.svg)](https://github.com/gustavolatorre/data_lakehouse/actions/workflows/ci.yml)
 [![coverage ≥85%](https://img.shields.io/badge/coverage-%E2%89%A585%25-brightgreen)](#-code-quality--unit-testing)
 [![python 3.12](https://img.shields.io/badge/python-3.12-blue)](pyproject.toml)
 [![license MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 > The coverage badge reflects the CI-enforced floor (`fail_under = 85` in `pyproject.toml`); the unit suite currently sits above it.
 
-> **Core Stack:** Airflow 3.2.1 | Spark 4.0.0 | Apache Iceberg 1.11.0 | Project Nessie 0.107.5 | dbt Core 1.8.x | Dremio | MinIO
+> **Core Stack:** Airflow 3.2.1 | Spark 4.0.0 | Apache Iceberg 1.11.0 | Project Nessie 0.107.5 | dbt Core (dbt-dremio) | Dremio 25.0.0 | MinIO
 
 ---
 
 This project implements a **production-ready, fully reactive, and completely idempotent Data Lakehouse** engineered under the **Medallion Architecture** pattern, dedicated to **Brasileirão Série A** football data. It ingests real match data from the **Globo Esporte (GE) internal JSON API**, orchestrates event-driven processing with **Apache Airflow 3.2.1**, cleans and enriches matches via **Apache Spark 4.0.0** (natively compiled with Scala 2.13), manages transactional table state with **Apache Iceberg 1.11.0**, tracks historical lineage with **Project Nessie** (Git-like catalog semantics), and builds the analytics-ready Gold model — the league table (*classificação*) — inside **Dremio** using **dbt Core**.
 
-> **One domain, multiple seasons.** The pipeline runs the full **Staging → Bronze → Silver → Gold** path for Brasileirão Série A. Each edition's GE identifiers live in a small YAML registry, so **adding a season is a config edit, not a code change** (see [Multi-Season Ingestion](#-multi-season-ingestion)).
+> **One domain, multiple seasons.** The pipeline runs the full **Staging → Bronze → Silver → Gold** path for Brasileirão Série A. The active edition is **derived automatically from the run's year** (the GE championship UUID is stable; only the per-year slug changes), so the pipeline **rolls over to the next season with no config edit** (see [Season Turnover](#-season-turnover-automatic-roll-over)).
 
 ---
 
@@ -64,7 +64,7 @@ Every layer re-processes the **complete current state** each run rather than an 
 
 ### 1. Ingestion (Staging Layer)
 `src/staging/fetch_brasileirao.py` reads the GE internal JSON API — the same endpoint the browser calls.
-*   **Multi-season, full reconcile:** for every configured edition it scans all 38 rounds, keeps only **finished** matches (official score present **and** kicked off), and writes one file per match date: `s3://staging/brasileirao/{match_date}/matches.json`.
+*   **Current-season, full reconcile:** for the active edition (derived from the run's year) it scans all 38 rounds, keeps only **finished** matches (official score present **and** kicked off), and writes one file per match date: `s3://staging/brasileirao/{match_date}/matches.json`.
 *   **Fail-loud on partial fetches:** if any round still fails after retries (3× exponential backoff), the task raises `RuntimeError` rather than stage an incomplete season that would slip past the Bronze `row_count >= 1` gate.
 *   **In-memory S3 streaming:** each date's JSON is serialized in memory and streamed straight to MinIO via the native client's `put_object` — no temp local writes.
 
@@ -235,17 +235,19 @@ This provisions **11 services** in the `lakehouse` bridge network — nine long-
 ```bash
 uv run pytest --cov=src --cov-report=term-missing tests/unit/   # unit + 85% coverage gate
 uv run ruff check src/ tests/ dags/ && uv run ruff format --check src/ tests/ dags/
-uv run mypy src/
+uv run mypy src/ dags/
 ```
 
 Unit tests mock the API and MinIO and use a local SparkSession fixture for the real transformations (**Java 17 required** for any Spark test). The integration suite (`tests/integration/`) exercises the real Bronze→Silver code paths against a local Iceberg warehouse.
+
+Every PR is also gated by **CodeQL** (Python SAST), **Trivy** (dependency `fs` + built-image scans), and the full **pre-commit** hook suite (file hygiene, `detect-secrets`, ruff). `main` is protected by a ruleset — PR + review + all required checks green, no force-push or deletion.
 
 ---
 
 ## 📁 Project Structure
 
 ```
-data_lake/
+data_lakehouse/
 ├── dags/                          # Airflow DAGs
 │   ├── staging_brasileirao_ingestion.py        # L1: GE API ingestion (daily)
 │   ├── bronze_silver_brasileirao_processing.py # L2: Spark Bronze + Silver, branch-isolated (asset-triggered)
@@ -264,9 +266,10 @@ data_lake/
 ├── dbt_project/                   # dbt Core project (Gold layer on Dremio)
 ├── docker/                        # Dockerfiles & provisioning scripts
 ├── tests/                         # Unit (pytest + chispa + AST DAG validator) + integration
-├── .github/workflows/ci.yml       # CI: Lint · Test · Integration · dbt Validate · Security
-├── docker-compose.yml             # 11-service topology
-├── Makefile · pyproject.toml · .env.example · LICENSE
+├── .github/workflows/             # ci.yml (Lint·Test·Integration·dbt Validate·Security·Pre-commit) · codeql.yml · docker-build.yml
+├── docker-compose.yml             # 11-service topology (hardened: no-new-privileges)
+├── README.md · ARCHITECTURE.md · CONTRIBUTING.md · SECURITY.md · CHANGELOG.md
+├── Makefile · pyproject.toml · .env.example · .trivyignore · LICENSE
 ```
 
 ---
