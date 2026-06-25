@@ -74,7 +74,7 @@ What we still want (roadmap):
 | OIDC/OAuth login for Airflow (replace SimpleAuthManager) | Deferred |
 | Bearer auth on Nessie REST API | Deferred |
 | Encrypt secrets at rest (SOPS + age) instead of a plaintext gitignored `.env` | Deferred — see "Secrets at rest" below |
-| Promote the remaining informational scans (`pip-audit`, Trivy config MEDIUM+) to blocking. The **HIGH+CRITICAL fs gate is now live** (promoted once the fixable HIGH backlog hit 0); the rest stay informational until their unfixable-transitive / config-nit backlog is curated. | Follow-up |
+| Promote the remaining informational scans (`pip-audit`, Trivy config MEDIUM+) to blocking. The **HIGH+CRITICAL fs gate is now live** (promoted once the fixable HIGH backlog hit 0). **Promotion criterion:** flip each to blocking once it reports **0 new findings for 4 consecutive weekly runs** — the same objective bar that promoted the fs gate, so this actually happens instead of staying "informational" indefinitely. | Follow-up |
 
 ## Secrets at rest (deferred, with a chosen path)
 
