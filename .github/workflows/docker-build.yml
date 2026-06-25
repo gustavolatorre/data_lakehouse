@@ -34,10 +34,9 @@ jobs:
     name: Docker Build
     runs-on: ubuntu-latest
     # Build both custom images so an image-level breakage (bad JAR URL,
-    # Dockerfile typo, base-image drift, failed SHA verification) is caught
-    # here instead of at `make up` time. Build only — nothing is pushed.
-    # Plain `docker build` (Docker is preinstalled on the runner) to avoid
-    # adding marketplace actions that would need SHA pinning.
+    # Dockerfile typo, base-image drift, failed SHA verification) is caught here
+    # instead of at `make up` time, then scan them for OS/library CVEs.
+    # Build-only — nothing is pushed.
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
 
@@ -46,3 +45,29 @@ jobs:
 
       - name: Build Airflow image
         run: docker build -f docker/Dockerfile.airflow -t data_lake-airflow:ci .
+
+      # Container vulnerability scanning at build time (E5). Informational for
+      # now (continue-on-error): the base images (Spark/JDK, Airflow) carry OS
+      # CVEs we don't control yet, and `ignore-unfixed: true` already drops the
+      # unpatchable ones. Promote to blocking once the fixable backlog is clean —
+      # the same graduated path the Trivy fs gate took (F-12). SHA-pinned, the
+      # same action the CI Security job already uses.
+      - name: Trivy image scan — Spark (informational)
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: data_lake-spark:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: table
+
+      - name: Trivy image scan — Airflow (informational)
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: data_lake-airflow:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: table
