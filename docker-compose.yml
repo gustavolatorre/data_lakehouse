@@ -223,13 +223,26 @@ services:
           sleep 2;
         done;
         echo "Creating buckets...";
-        mc mb --ignore-existing local/staging &&
-        mc mb --ignore-existing local/warehouse &&
-        echo "Buckets created successfully." &&
+        mc mb --ignore-existing local/staging;
+        mc mb --ignore-existing local/warehouse;
+        echo "Buckets ready.";
+        if [ -n "$${MINIO_SVC_ACCESS_KEY}" ] && [ -n "$${MINIO_SVC_SECRET_KEY}" ]; then
+          if mc admin user svcacct info local "$${MINIO_SVC_ACCESS_KEY}" >/dev/null 2>&1; then
+            echo "Data-plane service account already exists.";
+          elif mc admin user svcacct add --access-key "$${MINIO_SVC_ACCESS_KEY}" --secret-key "$${MINIO_SVC_SECRET_KEY}" --policy /policies/lakehouse-rw.json local "$${MINIO_ROOT_USER}"; then
+            echo "Data-plane service account created (RW on staging + warehouse).";
+          else
+            echo "WARN: service account creation failed - data plane falls back to root.";
+          fi;
+        else
+          echo "MINIO_SVC_* unset - data plane uses root (set them in .env to harden).";
+        fi;
         exit 0;
       '
     env_file:
       - .env
+    volumes:
+      - ./docker/minio-policy.json:/policies/lakehouse-rw.json:ro
     networks:
       - lakehouse
 

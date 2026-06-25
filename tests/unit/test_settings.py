@@ -38,6 +38,8 @@ def clean_env(monkeypatch, tmp_path):
         "GE_SEASONS",
         "GE_CAMPEONATO_ID",
         "GE_FASE_SLUG_TEMPLATE",
+        "MINIO_ACCESS_KEY",
+        "MINIO_SECRET_KEY",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -142,5 +144,36 @@ class TestPlaceholderRejection:
 
     def test_settings_rejects_placeholder_password(self, clean_env, monkeypatch):
         monkeypatch.setenv("MINIO_ROOT_PASSWORD", "<change-me-min-24-chars>")
+        with pytest.raises(ValidationError, match="placeholder"):
+            settings_module.Settings()  # type: ignore[call-arg]
+
+
+class TestMinioServiceAccount:
+    """Data-plane creds prefer the scoped service account, falling back to root (F2-1)."""
+
+    def test_s3_creds_fall_back_to_root_when_unset(self, clean_env):
+        s = settings_module.Settings()  # type: ignore[call-arg]
+        assert s.s3_access_key == "test-user"
+        assert s.s3_secret_key == "test-pass-strong-enough"  # pragma: allowlist secret
+
+    def test_s3_creds_use_service_account_when_set(self, clean_env, monkeypatch):
+        monkeypatch.setenv("MINIO_ACCESS_KEY", "lakehouse-app")
+        monkeypatch.setenv("MINIO_SECRET_KEY", "svc-secret-strong-123456")
+        s = settings_module.Settings()  # type: ignore[call-arg]
+        assert s.s3_access_key == "lakehouse-app"
+        assert s.s3_secret_key == "svc-secret-strong-123456"  # pragma: allowlist secret
+
+    def test_empty_service_secret_is_allowed(self, clean_env):
+        # The default (unset) MINIO_SECRET_KEY must not trip the strength gate.
+        s = settings_module.Settings()  # type: ignore[call-arg]
+        assert s.minio_secret_key == ""
+
+    def test_weak_service_secret_is_rejected(self, clean_env, monkeypatch):
+        monkeypatch.setenv("MINIO_SECRET_KEY", "short")
+        with pytest.raises(ValidationError, match="too short"):
+            settings_module.Settings()  # type: ignore[call-arg]
+
+    def test_placeholder_service_secret_is_rejected(self, clean_env, monkeypatch):
+        monkeypatch.setenv("MINIO_SECRET_KEY", "<change-me-min-24-chars>")
         with pytest.raises(ValidationError, match="placeholder"):
             settings_module.Settings()  # type: ignore[call-arg]

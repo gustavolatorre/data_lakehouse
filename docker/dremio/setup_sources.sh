@@ -11,8 +11,10 @@ DREMIO_URL="http://dremio:9047"
 DREMIO_USER="${DREMIO_ADMIN_USER:?DREMIO_ADMIN_USER must be set (see .env)}"
 DREMIO_PASS="${DREMIO_ADMIN_PASSWORD:?DREMIO_ADMIN_PASSWORD must be set (see .env)}"
 NESSIE_ENDPOINT="${NESSIE_URI:-http://nessie:19120/api/v2}"
-MINIO_ACCESS_KEY="${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set (see .env)}"
-MINIO_SECRET_KEY="${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set (see .env)}"
+# Data plane uses the scoped MinIO service account when configured (F2-1),
+# falling back to root only if MINIO_SVC_* is unset.
+MINIO_ACCESS_KEY="${MINIO_SVC_ACCESS_KEY:-${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set (see .env)}}"
+MINIO_SECRET_KEY="${MINIO_SVC_SECRET_KEY:-${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set (see .env)}}"
 MAX_RETRIES=40
 RETRY_INTERVAL=10
 

@@ -30,8 +30,8 @@ def builder():
 def mock_settings():
     return MagicMock(
         minio_endpoint="minio:9000",
-        minio_root_user="ak",
-        minio_root_password="sk",  # pragma: allowlist secret
+        s3_access_key="ak",
+        s3_secret_key="sk",  # pragma: allowlist secret
         nessie_uri="http://nessie:19120/api/v2",
         # OpenLineage disabled by default in the shared fixture; per-test
         # fixtures below override `openlineage_url` to flip it on.
@@ -45,8 +45,8 @@ def mock_settings_with_openlineage():
     """Same as mock_settings but with the OpenLineage HTTP transport enabled."""
     return MagicMock(
         minio_endpoint="minio:9000",
-        minio_root_user="ak",
-        minio_root_password="sk",  # pragma: allowlist secret
+        s3_access_key="ak",
+        s3_secret_key="sk",  # pragma: allowlist secret
         nessie_uri="http://nessie:19120/api/v2",
         openlineage_url="http://marquez:5000",
         openlineage_namespace="data_lake",

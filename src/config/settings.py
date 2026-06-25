@@ -105,6 +105,13 @@ class Settings(BaseSettings):
     # (HTTP). Set MINIO_SECURE=true in staging/prod environments where MinIO
     # (or the upstream S3 service) is fronted by HTTPS.
     minio_secure: bool = False
+    # Data-plane service account (F2-1, least privilege). When set, Spark /
+    # Dremio / the app authenticate to MinIO with these scoped credentials
+    # (RW on the staging + warehouse buckets only) instead of root, so a
+    # compromised job cannot administer the object store. Empty (default) =
+    # fall back to root — see the `s3_access_key` / `s3_secret_key` properties.
+    minio_access_key: str = ""
+    minio_secret_key: str = ""
 
     # Nessie
     nessie_uri: str = "http://nessie:19120/api/v2"
@@ -144,6 +151,23 @@ class Settings(BaseSettings):
     @classmethod
     def _reject_weak_minio_password(cls, v: str) -> str:
         return _validate_password_strength(v, "MINIO_ROOT_PASSWORD")
+
+    @field_validator("minio_secret_key")
+    @classmethod
+    def _reject_weak_minio_svc_secret(cls, v: str) -> str:
+        # Empty = service account not configured (data plane falls back to
+        # root); only gate real values for strength.
+        return _validate_password_strength(v, "MINIO_SECRET_KEY") if v else v
+
+    @property
+    def s3_access_key(self) -> str:
+        """Data-plane S3 access key: the scoped service account if set, else root."""
+        return self.minio_access_key or self.minio_root_user
+
+    @property
+    def s3_secret_key(self) -> str:
+        """Data-plane S3 secret key: the scoped service account if set, else root."""
+        return self.minio_secret_key or self.minio_root_password
 
 
 @lru_cache(maxsize=1)
