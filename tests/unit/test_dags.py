@@ -209,3 +209,66 @@ class TestSparkWorkerPool:
                     assert pool_arg.id == "SPARK_WORKER_POOL"
                 else:
                     pytest.fail(f"unexpected AST node for pool kwarg in {filename}: {ast.dump(pool_arg)}")
+
+
+class TestNessieBranchPropagation:
+    """A1 regression: the Bronze/Silver DAG must propagate the Nessie branch +
+    execution date from ``create_branch``'s XCom — never recompute them per task.
+
+    A per-task recompute (the old ``NESSIE_BRANCH_TEMPLATE`` from
+    ``dag_run.logical_date`` with a UTC ``now()`` fallback) could derive a
+    different date/branch than ``create_branch`` (which uses America/Sao_Paulo):
+    across the midnight boundary, or any evening BRT run. The Spark jobs would
+    then write to a branch ``create_branch`` never made, and merge/cleanup would
+    act on an orphan. These tests freeze the single-source contract.
+    """
+
+    DAG_FILE = "bronze_silver_brasileirao_processing.py"
+
+    def _spark_submit_arg_lists(self) -> list[ast.AST]:
+        tree = _parse(self.DAG_FILE)
+        arg_lists = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "SparkSubmitOperator":
+                kwargs = {kw.arg: kw.value for kw in node.keywords}
+                if "application_args" in kwargs:
+                    arg_lists.append(kwargs["application_args"])
+        return arg_lists
+
+    def test_spark_jobs_reference_xcom_constants(self):
+        """Every Spark job passes the XCom-backed constants as its args."""
+        arg_lists = self._spark_submit_arg_lists()
+        assert arg_lists, "expected SparkSubmitOperator(s) with application_args"
+        for args in arg_lists:
+            names = {n.id for n in ast.walk(args) if isinstance(n, ast.Name)}
+            assert "XCOM_NESSIE_BRANCH" in names, "Spark --nessie-ref must use the XCom branch constant"
+            assert "XCOM_EXECUTION_DATE" in names, "Spark execution_date must use the XCom date constant"
+
+    def test_xcom_constants_pull_from_create_branch(self):
+        """Those constants must be templates pulling create_branch's XCom dict."""
+        tree = _parse(self.DAG_FILE)
+        consts: dict[str, str] = {}
+        for node in tree.body:
+            if (
+                isinstance(node, ast.Assign)
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+            ):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        consts[target.id] = node.value.value
+        assert "xcom_pull(task_ids='create_branch')['branch']" in consts.get("XCOM_NESSIE_BRANCH", "")
+        assert "xcom_pull(task_ids='create_branch')['execution_date']" in consts.get("XCOM_EXECUTION_DATE", "")
+
+    def test_no_per_task_date_recompute(self):
+        """The recompute anti-pattern must not come back in any DAG template.
+
+        The only date derivation lives in ``create_branch`` (which uses
+        ``pendulum.now`` as the single documented fallback for a missing ``ds``).
+        We scan string *literals* (the Jinja templates) rather than the raw
+        source so explanatory comments may still mention the anti-pattern they
+        replaced.
+        """
+        blob = " ".join(_collect_string_constants(_parse(self.DAG_FILE)))
+        assert "dag_run.logical_date" not in blob, "no per-task recompute from logical_date in any template"
+        assert "macros.datetime.now" not in blob, "no per-task recompute via macros.datetime.now"
