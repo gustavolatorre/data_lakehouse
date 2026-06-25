@@ -31,8 +31,8 @@ def create_minio_client() -> Minio:
 
     client = Minio(
         settings.minio_endpoint,
-        access_key=settings.minio_root_user,
-        secret_key=settings.minio_root_password,
+        access_key=settings.s3_access_key,
+        secret_key=settings.s3_secret_key,
         secure=settings.minio_secure,
     )
 

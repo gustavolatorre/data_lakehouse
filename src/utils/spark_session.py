@@ -83,8 +83,8 @@ def create_spark_session(app_name: str, *, nessie_ref: str = "main") -> SparkSes
             "spark.hadoop.fs.s3a.endpoint",
             f"http://{settings.minio_endpoint}",
         )
-        .config("spark.hadoop.fs.s3a.access.key", settings.minio_root_user)
-        .config("spark.hadoop.fs.s3a.secret.key", settings.minio_root_password)
+        .config("spark.hadoop.fs.s3a.access.key", settings.s3_access_key)
+        .config("spark.hadoop.fs.s3a.secret.key", settings.s3_secret_key)
         .config("spark.hadoop.fs.s3a.path.style.access", "true")
         .config(
             "spark.hadoop.fs.s3a.impl",
