@@ -6,6 +6,20 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **MinIO least-privilege service account** for the data plane: Spark / Dremio /
+  the app authenticate with a scoped account (RW on `staging` + `warehouse` only);
+  root is reserved for administration, with graceful fallback to root when unset.
+
+### Changed
+- **Per-service env scoping** — each container is injected only the credentials it
+  needs (explicit `environment:` per service) instead of the whole `.env`.
+- **postgres** 14.15 → 14.23 (security patches within major 14).
+- `Makefile` now runs from **Git Bash** on Windows and on cloud-synced (OneDrive)
+  folders (`SHELL := bash` + `UV_NO_SYNC` + `UV_LINK_MODE=copy`).
+- mypy type-checking extended to `dags/`; objective promotion criterion documented
+  for the informational `pip-audit` / Trivy config scans.
+
 ### Security
 - Bumped **apache-airflow** 3.2.1 → 3.2.2, which ships a FastAPI (0.138.0) that
   supports **starlette 1.3.1** — resolving 5 Dependabot alerts (2 HIGH, 2 MEDIUM,

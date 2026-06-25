@@ -61,6 +61,8 @@ What we already do:
 | Nessie + Spark master not bound to host (`expose:` only) | `docker-compose.yml` |
 | SHA-256 verification of the Python 3.12 tarball | `docker/Dockerfile.spark` |
 | Dremio source provisioning logs scrubbed of credentials | `docker/dremio/setup_sources.sh` |
+| MinIO **least-privilege service account** for the data plane (root reserved for admin) | `docker/minio-policy.json` |
+| Per-service env scoping — each container gets only the creds it needs, not the whole `.env` | `docker-compose.yml` |
 | Trivy fs **blocking gate on fixable HIGH + CRITICAL** + `pip-audit` & Trivy config (informational) on every PR | `.github/workflows/ci.yml` |
 | `detect-secrets` + `detect-private-key` on every commit | `.pre-commit-config.yaml` |
 | Trivy **image** scan of the built Spark/Airflow images | `.github/workflows/docker-build.yml` |

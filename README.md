@@ -7,11 +7,11 @@
 
 > The coverage badge reflects the CI-enforced floor (`fail_under = 85` in `pyproject.toml`); the unit suite currently sits above it.
 
-> **Core Stack:** Airflow 3.2.1 | Spark 4.0.0 | Apache Iceberg 1.11.0 | Project Nessie 0.107.5 | dbt Core (dbt-dremio) | Dremio 25.0.0 | MinIO
+> **Core Stack:** Airflow 3.2.2 | Spark 4.0.0 | Apache Iceberg 1.11.0 | Project Nessie 0.107.5 | dbt Core (dbt-dremio) | Dremio 25.0.0 | MinIO
 
 ---
 
-This project implements a **production-ready, fully reactive, and completely idempotent Data Lakehouse** engineered under the **Medallion Architecture** pattern, dedicated to **Brasileirão Série A** football data. It ingests real match data from the **Globo Esporte (GE) internal JSON API**, orchestrates event-driven processing with **Apache Airflow 3.2.1**, cleans and enriches matches via **Apache Spark 4.0.0** (natively compiled with Scala 2.13), manages transactional table state with **Apache Iceberg 1.11.0**, tracks historical lineage with **Project Nessie** (Git-like catalog semantics), and builds the analytics-ready Gold model — the league table (*classificação*) — inside **Dremio** using **dbt Core**.
+This project implements a **production-ready, fully reactive, and completely idempotent Data Lakehouse** engineered under the **Medallion Architecture** pattern, dedicated to **Brasileirão Série A** football data. It ingests real match data from the **Globo Esporte (GE) internal JSON API**, orchestrates event-driven processing with **Apache Airflow 3.2.2**, cleans and enriches matches via **Apache Spark 4.0.0** (natively compiled with Scala 2.13), manages transactional table state with **Apache Iceberg 1.11.0**, tracks historical lineage with **Project Nessie** (Git-like catalog semantics), and builds the analytics-ready Gold model — the league table (*classificação*) — inside **Dremio** using **dbt Core**.
 
 > **One domain, multiple seasons.** The pipeline runs the full **Staging → Bronze → Silver → Gold** path for Brasileirão Série A. The active edition is **derived automatically from the run's year** (the GE championship UUID is stable; only the per-year slug changes), so the pipeline **rolls over to the next season with no config edit** (see [Season Turnover](#-season-turnover-automatic-roll-over)).
 
@@ -138,16 +138,14 @@ season = (GE_CAMPEONATO_ID,                    # stable UUID, same every year
 
 Project Nessie is the transactional catalog. Every Bronze/Silver run carves its own branch before any Spark write and merges back to `main` only after Silver succeeds:
 
-```
-main ───────────────────────────────────────●─────▶ (Gold reads here)
-                                            ▲
-                                            │ merge_branch (success path)
-            create_branch                   │
-main ──●── etl_bronze_silver_brasileirao_<date> ┘
-       └──────▶ staging_to_bronze ▶ bronze_to_silver ▶ merge_branch
-                                          │
-                                          ▼ on any failure
-                                    cleanup_branch (drops branch — main untouched)
+```mermaid
+flowchart LR
+    CB["create_branch<br/>etl_bronze_silver_brasileirao_&lt;date&gt;"] --> S2B[staging_to_bronze]
+    S2B --> B2S[bronze_to_silver]
+    B2S -->|Silver OK| MB["merge_branch → main"]
+    MB --> MAIN[("main — Gold / dbt reads here")]
+    S2B -.->|any failure| CL["cleanup_branch<br/>(drops branch — main untouched)"]
+    B2S -.->|any failure| CL
 ```
 
 `src/utils/nessie_branch.py` hits the Nessie v2 REST API directly (no `nessie-spark-extensions` JAR). Branch names are deterministic, so re-runs reuse the branch instead of failing. Gold (dbt-dremio) builds against `main`. Iceberg `format-version=2` everywhere (Dremio 25.0.0 cannot read v3).
