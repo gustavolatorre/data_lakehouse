@@ -242,7 +242,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./docker/minio/lakehouse-rw-policy.json:/policies/lakehouse-rw.json:ro
+      - ./docker/minio-policy.json:/policies/lakehouse-rw.json:ro
     networks:
       - lakehouse
 
