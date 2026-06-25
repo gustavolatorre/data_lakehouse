@@ -1,6 +1,6 @@
 [project]
 name = "data-lake"
-version = "3.1.0"
+version = "3.2.0"
 description = "Brasileirão Série A medallion data lakehouse using Airflow, PySpark, Apache Iceberg, Nessie, and dbt"
 readme = "README.md"
 requires-python = ">=3.12"
