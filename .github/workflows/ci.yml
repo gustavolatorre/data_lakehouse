@@ -100,7 +100,7 @@ jobs:
       - name: Cache Spark Ivy jars
         # First Spark start downloads ``iceberg-spark-runtime-4.0_2.13`` via
         # Ivy. Caching ``~/.ivy2`` shaves ~30s off subsequent CI runs.
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: |
             ~/.ivy2
