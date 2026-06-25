@@ -2,7 +2,7 @@
 
 ## Local setup
 
-Prerequisites: Docker Desktop, `uv` (Astral's package manager), `make`.
+Prerequisites: Docker Desktop, `uv` (Astral's package manager), `make` — on Windows, run `make` from **Git Bash** (not PowerShell), which ships `make` plus the Unix tools the recipes use.
 
 ```bash
 # 1. Clone + enter the repo

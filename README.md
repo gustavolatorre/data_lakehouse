@@ -180,6 +180,8 @@ Spark 4.0.0 + Hadoop 3.4.1 required precise classpath alignment:
 
 ## 🚀 How to Run & Validate
 
+> **Windows:** run `make` from **Git Bash** (it ships `make`, `bash`, and the Unix tools the recipes use), not PowerShell.
+
 ### 1. Initialize the Python environment (`uv`)
 ```bash
 uv venv --python 3.12
