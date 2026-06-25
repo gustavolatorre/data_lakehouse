@@ -56,7 +56,7 @@ known-first-party = ["src"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src"]
+files = ["src", "dags"]
 ignore_missing_imports = true
 warn_return_any = true
 warn_unused_configs = true
