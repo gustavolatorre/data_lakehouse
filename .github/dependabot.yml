@@ -112,3 +112,8 @@ updates:
       # volume); allow minor/patch security bumps to flow.
       - dependency-name: "postgres"
         update-types: ["version-update:semver-major"]
+      # MinIO server + client use date-stamped RELEASE.* tags, not semver, so
+      # Dependabot cannot compare/track them — bumps are manual. Also held
+      # because 2025+ community images removed the embedded web console.
+      - dependency-name: "minio/minio"
+      - dependency-name: "minio/mc"
