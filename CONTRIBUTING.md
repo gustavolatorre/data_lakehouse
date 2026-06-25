@@ -41,10 +41,10 @@ Open:
    - `docs/<thing>` — documentation only
 2. Commit as you go. Pre-commit will format / lint / scan on every commit.
 3. When ready, push and open a PR against `main`.
-4. CI runs Lint, Test, Integration, dbt Validate, Security. The first four are
-   blocking. In Security, the Trivy fs gate (fixable HIGH+CRITICAL) is also
-   blocking (F-12); `pip-audit` and the Trivy config scan stay informational
-   (`continue-on-error: true`).
+4. CI runs Lint, Test, Integration, dbt Validate, Security, Pre-commit, and
+   CodeQL — all required to merge. In Security, the Trivy fs gate (fixable
+   HIGH+CRITICAL) is blocking; `pip-audit` and the Trivy config scan stay
+   informational (`continue-on-error: true`).
 5. After approval, squash-merge.
 
 ## Commit message conventions
@@ -126,6 +126,19 @@ Open an issue with:
 - Full error message + stack trace (or scheduler log excerpt)
 - What you ran (`make up` from scratch? trigger from UI? from the CLI?)
 - Anything you've already ruled out
+
+## Internal change-tracking tags
+
+Some inline comments and docs carry short tags like `F-12`, `B-02`, `P3.10`, or
+`D4`. They reference this project's internal development roadmap (kept private)
+and exist purely for traceability — why a given line or guard is there:
+
+- `F-NN` — feature / enhancement
+- `B-NN` — bug fix / hardening
+- `P<phase>.<n>` — a roadmap phase item
+- `D<n>` — a design decision
+
+They aren't actionable for contributors; treat them as historical breadcrumbs.
 
 ## Code of conduct
 

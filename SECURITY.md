@@ -8,7 +8,7 @@ disclosure process.
 
 | Version | Supported |
 |---------|-----------|
-| 3.1.x   | ✅ — current main branch |
+| 3.2.x   | ✅ — current main branch |
 | 2.x     | ❌ — superseded by 3.x; please rebase |
 
 ## Reporting a vulnerability
@@ -46,8 +46,8 @@ Out of scope:
   other base images that are already fixed upstream and only require a
   bump (please open a Dependabot-style PR instead)
 - Hardening of the SimpleAuthManager's plaintext password file — this is a
-  known limitation of Airflow 3's bundled auth manager; replacing it is
-  tracked as roadmap item P3.10
+  known limitation of Airflow 3's bundled auth manager; replacing it with a
+  real auth backend is a deliberately deferred item (see the roadmap below)
 
 ## Current hardening posture
 
@@ -63,17 +63,18 @@ What we already do:
 | Dremio source provisioning logs scrubbed of credentials | `docker/dremio/setup_sources.sh` |
 | Trivy fs **blocking gate on fixable HIGH + CRITICAL** + `pip-audit` & Trivy config (informational) on every PR | `.github/workflows/ci.yml` |
 | `detect-secrets` + `detect-private-key` on every commit | `.pre-commit-config.yaml` |
-| Dependabot weekly for pip, GitHub Actions, Docker | `.github/dependabot.yml` |
+| Trivy **image** scan of the built Spark/Airflow images | `.github/workflows/docker-build.yml` |
+| CodeQL (Python SAST) on every push & PR | `.github/workflows/codeql.yml` |
+| Dependabot version updates **+ security alerts & updates** for pip, GitHub Actions, Docker | `.github/dependabot.yml` |
 
 What we still want (roadmap):
 
-| Item | Tracked as |
-|------|------------|
-| OIDC/OAuth login for Airflow (replace SimpleAuthManager) | P3.10 |
-| Bearer auth on Nessie REST API | P0.3 follow-up |
-| Container vulnerability scanning at build time | P3.4 extension |
-| Encrypt secrets at rest (SOPS + age) instead of a plaintext gitignored `.env` | deferred — see "Secrets at rest" below |
-| Promote the remaining informational scans (`pip-audit`, Trivy config MEDIUM+) to blocking. The **HIGH+CRITICAL fs gate is now live** (F-12 done — promoted once the fixable HIGH backlog hit 0); the rest stay informational until their unfixable-transitive / config-nit backlog is curated. | follow-up |
+| Item | Status |
+|------|--------|
+| OIDC/OAuth login for Airflow (replace SimpleAuthManager) | Deferred |
+| Bearer auth on Nessie REST API | Deferred |
+| Encrypt secrets at rest (SOPS + age) instead of a plaintext gitignored `.env` | Deferred — see "Secrets at rest" below |
+| Promote the remaining informational scans (`pip-audit`, Trivy config MEDIUM+) to blocking. The **HIGH+CRITICAL fs gate is now live** (promoted once the fixable HIGH backlog hit 0); the rest stay informational until their unfixable-transitive / config-nit backlog is curated. | Follow-up |
 
 ## Secrets at rest (deferred, with a chosen path)
 
@@ -101,7 +102,7 @@ Early in the project's history, `airflow.env` was tracked in git
 
 **Status: mitigated. History intentionally not rewritten.**
 
-- **Rotated.** Every exposed key was rotated (P0 in `CHANGELOG.md`); the values
+- **Rotated.** Every exposed key was rotated (logged in `CHANGELOG.md`); the values
   left in history are dead. (Verified: none of the historical secret values
   appear in the current `airflow.env`.)
 - **No external surface.** Every service binds to `127.0.0.1` / the internal
