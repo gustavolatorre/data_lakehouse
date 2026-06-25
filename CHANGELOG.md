@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/),
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Security
+- Bumped **apache-airflow** 3.2.1 → 3.2.2, which ships a FastAPI (0.138.0) that
+  supports **starlette 1.3.1** — resolving 5 Dependabot alerts (2 HIGH, 2 MEDIUM,
+  1 LOW) against the previously-pinned starlette 0.52.1. Base image bumped to
+  `apache/airflow:3.2.2-python3.12`. Removed the now-satisfied starlette
+  suppressions from `.trivyignore` (their exit condition was exactly this
+  airflow/FastAPI upgrade).
+
 ## [3.2.0] - 2026-06-25
 
 First public release — a focused, single-domain **Brasileirão Série A** medallion
