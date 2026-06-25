@@ -46,18 +46,16 @@ SPARK_CONF = {
 # docker-compose.yml (`airflow pools set spark_worker 1 ...`).
 SPARK_WORKER_POOL = "spark_worker"
 
-EXECUTION_DATE_TEMPLATE = (
-    "{{ dag_run.logical_date.strftime('%Y-%m-%d') "
-    "if (dag_run is defined and dag_run.logical_date is not none) "
-    "else macros.datetime.now().strftime('%Y-%m-%d') }}"
-)
-
-NESSIE_BRANCH_TEMPLATE = (
-    "etl_bronze_silver_brasileirao_{{ (dag_run.logical_date.strftime('%Y-%m-%d') "
-    "if (dag_run is defined and dag_run.logical_date is not none) "
-    "else macros.datetime.now().strftime('%Y-%m-%d'))"
-    ".replace('-', '_') }}"
-)
+# Jinja templates that read create_branch's XCom return value (a dict). Every
+# downstream consumer — both Spark jobs, merge, cleanup, check_quarantine — uses
+# the SAME execution_date + branch name that create_branch computed *once*. This
+# replaces the old per-task recompute from `dag_run.logical_date` (with a now()
+# fallback in UTC), which could derive a DIFFERENT date/branch than create_branch
+# (which uses America/Sao_Paulo) — across the midnight boundary or just any
+# evening BRT run — leaving the Spark jobs writing to a branch create_branch
+# never made and merge/cleanup acting on an orphan (A1).
+XCOM_EXECUTION_DATE = "{{ ti.xcom_pull(task_ids='create_branch')['execution_date'] }}"
+XCOM_NESSIE_BRANCH = "{{ ti.xcom_pull(task_ids='create_branch')['branch'] }}"
 
 on_failure_callback = build_failure_callback("BRONZE/SILVER BRASILEIRAO PROCESSING")
 
@@ -83,18 +81,26 @@ def bronze_silver_brasileirao_pipeline():
     """Branch-isolated Bronze/Silver pipeline for Brasileirao."""
 
     @task(task_id="create_branch", retries=1)
-    def create_branch(**context) -> str:
-        """Create the isolated Nessie branch and return its name."""
+    def create_branch(**context) -> dict[str, str]:
+        """Create the isolated Nessie branch and return its name + execution date.
+
+        This is the **single source of truth** for both values: the execution
+        date is resolved once (``ds``, falling back to ``now`` only when an
+        asset-triggered run has no logical date) and the branch name is derived
+        from it. Every downstream task consumes this XCom instead of recomputing,
+        so the branch the Spark jobs write to can never diverge from the one
+        created here / merged / cleaned up (A1).
+        """
         from src.utils.nessie_branch import build_branch_name
         from src.utils.nessie_branch import create_branch as _create
 
         execution_date = context.get("ds") or pendulum.now(local_tz).strftime("%Y-%m-%d")
         name = build_branch_name(dag_id="bronze_silver_brasileirao", execution_date=execution_date)
-        logger.info("Creating isolated Nessie branch '%s'", name)
+        logger.info("Creating isolated Nessie branch '%s' (execution_date=%s)", name, execution_date)
         _create(name, source_ref="main")
-        return name
+        return {"execution_date": execution_date, "branch": name}
 
-    branch_name = create_branch()
+    cb = create_branch()
 
     staging_to_bronze = SparkSubmitOperator(
         task_id="staging_to_bronze",
@@ -104,9 +110,9 @@ def bronze_silver_brasileirao_pipeline():
         conf=SPARK_CONF,
         pool=SPARK_WORKER_POOL,
         application_args=[
-            EXECUTION_DATE_TEMPLATE,
+            XCOM_EXECUTION_DATE,
             "--nessie-ref",
-            NESSIE_BRANCH_TEMPLATE,
+            XCOM_NESSIE_BRANCH,
         ],
         verbose=False,
     )
@@ -119,9 +125,9 @@ def bronze_silver_brasileirao_pipeline():
         conf=SPARK_CONF,
         pool=SPARK_WORKER_POOL,
         application_args=[
-            EXECUTION_DATE_TEMPLATE,
+            XCOM_EXECUTION_DATE,
             "--nessie-ref",
-            NESSIE_BRANCH_TEMPLATE,
+            XCOM_NESSIE_BRANCH,
         ],
         verbose=False,
     )
@@ -134,7 +140,7 @@ def bronze_silver_brasileirao_pipeline():
         logger.info("Merging branch '%s' into 'main'", branch_ref)
         _merge(branch_ref, target="main")
 
-    merge_task = merge_branch(branch_name)
+    merge_task = merge_branch(cb["branch"])
 
     @task(task_id="cleanup_branch", trigger_rule=TriggerRule.ONE_FAILED, retries=1)
     def cleanup_branch(branch_ref: str) -> None:
@@ -144,16 +150,20 @@ def bronze_silver_brasileirao_pipeline():
         logger.warning("Upstream failure detected. Cleaning up branch '%s'", branch_ref)
         drop_branch(branch_ref)
 
-    cleanup_task = cleanup_branch(branch_name)
+    cleanup_task = cleanup_branch(cb["branch"])
 
     @task(task_id="check_quarantine", retries=2)
-    def check_quarantine(**context) -> None:
+    def check_quarantine(execution_date: str) -> None:
         """Alert (not just log) when rows were quarantined for today's run.
 
         Reads the marker the Silver Spark job drops in staging and pages the
         alert sink when quarantined_rows > 0. Post-merge observability only —
         intentionally NOT an upstream of cleanup_branch (F-18): a failure here
         must never drop a branch that merge_branch already merged into main.
+
+        ``execution_date`` comes from create_branch's XCom so the marker path
+        matches the date the Silver Spark job used — same single-source fix as
+        the branch name (A1).
         """
         import json
 
@@ -161,7 +171,6 @@ def bronze_silver_brasileirao_pipeline():
 
         from src.utils.minio_client import create_minio_client
 
-        execution_date = context.get("ds") or pendulum.now(local_tz).strftime("%Y-%m-%d")
         client = create_minio_client()
         object_name = f"brasileirao/{execution_date}/quarantine_alert.json"
 
@@ -196,10 +205,10 @@ def bronze_silver_brasileirao_pipeline():
             else:
                 logger.exception("Failed to check quarantine alert status in MinIO")
 
-    check_quar = check_quarantine()
+    check_quar = check_quarantine(cb["execution_date"])
 
     # Topological execution order
-    branch_name >> staging_to_bronze >> bronze_to_silver >> merge_task
+    cb >> staging_to_bronze >> bronze_to_silver >> merge_task
     # check_quarantine is observability only — hangs off bronze_to_silver (runs
     # in parallel with merge_branch) and is NOT wired into cleanup (F-18): its
     # failure must never drop a branch that merge_branch already merged into main.
