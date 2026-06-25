@@ -2,6 +2,21 @@
 # Reusable service definitions
 # ──────────────────────────────────────────────────────
 
+# Scoped data-plane env (F2-2): the MinIO / Nessie / OpenLineage vars the Spark
+# side actually reads — injected instead of the whole .env, so Spark never
+# receives DREMIO_*/POSTGRES_* it doesn't use. Shared via anchor so spark-worker
+# (which defines its own environment:) keeps the same set.
+x-spark-data-env: &spark-data-env
+  MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+  MINIO_SVC_ACCESS_KEY: ${MINIO_SVC_ACCESS_KEY:-}
+  MINIO_SVC_SECRET_KEY: ${MINIO_SVC_SECRET_KEY:-}
+  MINIO_SECURE: ${MINIO_SECURE:-false}
+  NESSIE_URI: ${NESSIE_URI:-http://nessie:19120/api/v2}
+  OPENLINEAGE_URL: ${OPENLINEAGE_URL:-}
+  OPENLINEAGE_NAMESPACE: ${OPENLINEAGE_NAMESPACE:-data_lake}
+
 x-spark-common: &spark-common
   image: data_lake-spark:latest
   pull_policy: never
@@ -14,8 +29,8 @@ x-spark-common: &spark-common
     # Mirrors the Airflow mount so the same hard-coded path works in either
     # deploy_mode (client / cluster).
     - ./quality:/opt/airflow/quality
-  env_file:
-    - .env
+  environment:
+    <<: *spark-data-env
   networks:
     - lakehouse
 
@@ -85,6 +100,7 @@ services:
       spark-master:
         condition: service_healthy
     environment:
+      <<: *spark-data-env
       SPARK_MODE: worker
       SPARK_WORKER_CORES: 2
       SPARK_WORKER_MEMORY: 2g
@@ -119,8 +135,7 @@ services:
     # recent patch for security fixes; 14.0 was the oldest 14 release (B-06).
     image: postgres:14.23
     security_opt: ["no-new-privileges:true"]
-    env_file:
-      - .env
+    # Scoped (F2-2): only the POSTGRES_* it needs — no MinIO/Dremio creds.
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -244,8 +259,12 @@ services:
         fi;
         exit 0;
       '
-    env_file:
-      - .env
+    # Scoped (F2-2): only the MinIO admin + service-account creds it uses.
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_SVC_ACCESS_KEY: ${MINIO_SVC_ACCESS_KEY:-}
+      MINIO_SVC_SECRET_KEY: ${MINIO_SVC_SECRET_KEY:-}
     volumes:
       - ./docker/minio-policy.json:/policies/lakehouse-rw.json:ro
     networks:
@@ -283,11 +302,15 @@ services:
     container_name: dremio-setup
     security_opt: ["no-new-privileges:true"]
     restart: on-failure
-    env_file:
-      - .env
+    # Scoped (F2-2): only the Dremio admin + Nessie/MinIO creds setup_sources.sh uses.
     environment:
       - DREMIO_ADMIN_USER=${DREMIO_ADMIN_USER}
       - DREMIO_ADMIN_PASSWORD=${DREMIO_ADMIN_PASSWORD}
+      - NESSIE_URI=${NESSIE_URI:-http://nessie:19120/api/v2}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - MINIO_SVC_ACCESS_KEY=${MINIO_SVC_ACCESS_KEY:-}
+      - MINIO_SVC_SECRET_KEY=${MINIO_SVC_SECRET_KEY:-}
     volumes:
       - ./docker/dremio/setup_sources.sh:/setup_sources.sh
     entrypoint: [ "/bin/sh", "/setup_sources.sh" ]
