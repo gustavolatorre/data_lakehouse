@@ -11,10 +11,11 @@ permissions:
   contents: read
 
 # Cancel superseded runs on the same ref (consecutive pushes to a PR) instead
-# of running full pipelines in parallel.
+# of running full pipelines in parallel. Scoped to PRs only, so a close merge
+# never cancels the just-started push run on main.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
