@@ -101,7 +101,7 @@ jobs:
       - name: Cache Spark Ivy jars
         # First Spark start downloads ``iceberg-spark-runtime-4.0_2.13`` via
         # Ivy. Caching ``~/.ivy2`` shaves ~30s off subsequent CI runs.
-        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.ivy2
@@ -243,7 +243,7 @@ jobs:
           cache-dependency-glob: "pyproject.toml"
 
       - name: Cache pre-commit hook environments
-        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
