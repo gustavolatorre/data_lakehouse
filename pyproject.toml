@@ -13,7 +13,7 @@ dependencies = [
     "pydantic-settings>=2.14.2",
     "minio>=7.2.20",
     "requests>=2.34.2",
-    "python-dotenv>=1.2.2",
+    "python-dotenv>=1.2.3",
     "beautifulsoup4>=4.15.0",
     "pyyaml>=6.0.3",
 ]
